@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PowerMem × HugeGraph · AI Memory 全能力演示</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+:root{--bg:#f5f6f8;--bg2:#fff;--bg3:#eef0f4;--card:#fff;--text:#1a1d28;--text2:#5a6070;--text3:#9ba0ac;--border:#dde0e8;--accent:#3b82f6;--accent2:#8b5cf6;--accent3:#06b6d4;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--pink:#ec4899;--gradient:linear-gradient(135deg,#3b82f6,#8b5cf6,#ec4899);--shadow:0 2px 12px rgba(0,0,0,.08);--radius:10px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"SF Pro Display","PingFang SC","Inter",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.6;height:100vh;overflow:hidden;}
+.app{display:flex;flex-direction:column;height:100vh;}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);z-index:100;}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:32px;height:32px;border-radius:8px;background:var(--gradient);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff;}
+.logo h1{font-size:15px;font-weight:700;}.logo h1 span{background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.logo-sub{font-size:10px;color:var(--text3);margin-top:1px;}
+.hdr-right{display:flex;align-items:center;gap:12px;}
+.conn-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(16,185,129,.4);}
+.conn-dot.err{background:var(--red);}
+.conn-text{font-size:11px;color:var(--text2);}
+.demo-btn{background:var(--gradient);color:#fff;border:none;padding:6px 14px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
+.demo-btn:hover{opacity:.9;transform:translateY(-1px);}
+.demo-btn:disabled{opacity:.5;pointer-events:none;}
+.main{display:flex;flex:1;overflow:hidden;}
+.left{flex:0 0 420px;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--bg2);}
+.right{flex:1;display:flex;flex-direction:column;background:var(--bg);}
+.chat-area{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;}
+.chat-msg{display:flex;gap:8px;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+.chat-msg.user{flex-direction:row-reverse;}
+.msg-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;}
+.msg-avatar.ai{background:var(--gradient);}.msg-avatar.user{background:var(--accent3);}
+.msg-body{max-width:320px;}
+.msg-bubble{padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.5;}
+.chat-msg.ai .msg-bubble{background:var(--bg3);border:1px solid var(--border);}
+.chat-msg.user .msg-bubble{background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.2);}
+.msg-time{font-size:9px;color:var(--text3);margin-top:2px;text-align:right;}
+.chat-msg.ai .msg-time{text-align:left;}
+.pipe-step{display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:6px;margin:2px 0;background:var(--bg3);border:1px solid var(--border);animation:fadeIn .3s ease;}
+.step-icon{width:18px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0;}
+.step-name{font-weight:700;color:var(--text);font-size:11px;}
+.step-info{color:var(--text2);font-size:10px;}
+.step-data{color:var(--accent3);font-size:10px;margin-top:1px;}
+.step-ms{color:var(--text3);font-size:9px;margin-left:auto;}
+.input-area{padding:8px 12px;border-top:1px solid var(--border);background:var(--bg2);}
+.input-row{display:flex;gap:6px;}
+.input-field{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12px;font-family:inherit;outline:none;resize:none;}
+.input-field:focus{border-color:var(--accent);}
+.send-btn{background:var(--accent);color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;}
+.send-btn:hover{background:#2563eb;}
+.send-btn:disabled{opacity:.4;pointer-events:none;}
+.quick-btns{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;}
+.quick-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:3px 8px;border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit;}
+.quick-btn:hover{border-color:var(--accent);color:var(--accent);}
+.right-top{flex:0 0 40px;display:flex;align-items:center;padding:8px 16px;border-bottom:1px solid var(--border);gap:16px;background:var(--bg2);}
+.stat{display:flex;align-items:center;gap:4px;}
+.stat-val{font-size:15px;font-weight:800;}
+.stat-val.blue{color:var(--accent);}.stat-val.green{color:var(--green);}
+.stat-val.purple{color:var(--accent2);}.stat-val.teal{color:var(--teal);}
+.stat-label{font-size:9px;color:var(--text3);}
+.tab-bar{flex:0 0 34px;display:flex;border-bottom:1px solid var(--border);background:var(--bg2);overflow-x:auto;gap:0;}
+.tab-btn{padding:7px 12px;font-size:11px;font-weight:700;color:var(--text2);cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;font-family:inherit;white-space:nowrap;}
+.tab-btn:hover{color:var(--text);}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab-content{flex:1;display:none;overflow-y:auto;padding:12px;}
+.tab-content.active{display:block;}
+#cy{width:100%;height:calc(100% - 30px);border:1px solid var(--border);border-radius:8px;background:var(--bg2);}
+.graph-ctrl{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+.graph-ctrl button{background:var(--bg3);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;}
+.graph-ctrl button:hover{border-color:var(--accent);}
+.mem-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;transition:box-shadow .2s;}
+.mem-card:hover{box-shadow:var(--shadow);}
+.mem-card .mem-id{font-size:10px;color:var(--text3);font-family:monospace;}
+.mem-card .mem-content{font-size:12px;margin:4px 0;}
+.mem-card .mem-meta{display:flex;gap:8px;font-size:10px;color:var(--text2);}
+.mem-card .mem-retention{color:var(--green);font-weight:700;}
+.mem-actions{display:flex;gap:4px;margin-top:6px;}
+.mem-actions button{background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit;}
+.mem-actions button:hover{border-color:var(--accent);}
+.mem-actions button.del:hover{border-color:var(--red);color:var(--red);}
+.cap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;}
+.cap-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;}
+.cap-card h3{font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+.cap-badge{font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;}
+.cap-badge.new{background:rgba(16,185,129,.15);color:var(--green);}
+.cap-badge.p0{background:rgba(239,68,68,.15);color:var(--red);}
+.cap-card ul{list-style:none;padding-left:0;}
+.cap-card li{font-size:11px;color:var(--text2);padding:2px 0;padding-left:14px;position:relative;}
+.cap-card li::before{content:'\25B8';position:absolute;left:0;color:var(--accent);}
+.loading{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:var(--text3);}
+pre{margin-top:4px;font-size:10px;background:var(--bg3);padding:6px;border-radius:4px;overflow-x:auto;max-height:150px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">P</div>
+      <div>
+        <h1><span>PowerMem</span> \u00d7 HugeGraph</h1>
+        <div class="logo-sub">AI Memory 全能力交互式演示 \u00b7 PowerMem 62aefd8 (2026-07-12) \u00d7 HG 1.7.0</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <div class="conn-dot" id="connDot"></div>
+      <span class="conn-text" id="connText">连接中...</span>
+      <button class="demo-btn" id="autoDemoBtn" onclick="runAutoDemo()">一键演示</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="left">
+      <div class="chat-area" id="chatArea"></div>
+      <div class="input-area">
+        <div class="input-row">
+          <textarea class="input-field" id="inputField" rows="2" placeholder="输入记忆内容或提问... (Enter发送, Shift+Enter换行)" onkeydown="handleKey(event)"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
+        </div>
+        <div class="quick-btns">
+          <button class="quick-btn" onclick="quickAdd()">+ 添加记忆</button>
+          <button class="quick-btn" onclick="quickSearch()">? 搜索记忆</button>
+          <button class="quick-btn" onclick="quickAdd2()">+ 跨实体记忆</button>
+          <button class="quick-btn" onclick="quickSearch2()">? 跨实体搜索</button>
+        </div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="right-top" id="statsBar">
+        <div class="stat"><span class="stat-val blue" id="stEntities">0</span><span class="stat-label">实体</span></div>
+        <div class="stat"><span class="stat-val green" id="stEdges">0</span><span class="stat-label">关系</span></div>
+        <div class="stat"><span class="stat-val purple" id="stVectors">0</span><span class="stat-label">向量</span></div>
+        <div class="stat"><span class="stat-val teal" id="stMemories">0</span><span class="stat-label">记忆</span></div>
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('graph')">知识图谱</button>
+        <button class="tab-btn" onclick="switchTab('memories')">记忆管理</button>
+        <button class="tab-btn" onclick="switchTab('pipeline')">管线详情</button>
+        <button class="tab-btn" onclick="switchTab('capabilities')">能力矩阵</button>
+      </div>
+      <div class="tab-content active" id="tab-graph">
+        <div class="graph-ctrl">
+          <button onclick="loadGraph()">刷新图谱</button>
+          <button onclick="cyFit()">适应窗口</button>
+          <button onclick="cyLayout('circle')">圆形布局</button>
+          <button onclick="cyLayout('breadthfirst')">层次布局</button>
+          <button onclick="cyLayout('cose')">力导向布局</button>
+        </div>
+        <div id="cy"></div>
+      </div>
+      <div class="tab-content" id="tab-memories">
+        <div style="margin-bottom:8px;display:flex;gap:6px;">
+          <button class="quick-btn" onclick="loadMemories()">刷新列表</button>
+          <button class="quick-btn" onclick="compressMemories()">压缩记忆</button>
+        </div>
+        <div id="memList"></div>
+      </div>
+      <div class="tab-content" id="tab-pipeline">
+        <div id="pipeContent"><div style="color:var(--text3);text-align:center;padding:40px;">执行 ADD 或 SEARCH 操作后，管线详情将在此显示</div></div>
+      </div>
+      <div class="tab-content" id="tab-capabilities"></div>
+    </div>
+  </div>
+</div>
+<script>
+const API='http://127.0.0.1:8765';
+let cy=null, lastTrace=[], autoDemoRunning=false;
+
+async function api(path,opts={}){const r=await fetch(API+path,opts);return r.json();}
+async function apiPost(path,body){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
+
+async function checkConn(){try{const d=await api('/api/stats');setConn(true);updateStats(d);return d;}catch(e){setConn(false);return null;}}
+function setConn(ok){document.getElementById('connDot').className='conn-dot'+(ok?'':' err');document.getElementById('connText').textContent=ok?'已连接':'未连接';}
+
+function updateStats(d){
+  document.getElementById('stEntities').textContent=d.entities||0;
+  document.getElementById('stEdges').textContent=d.edges||0;
+  document.getElementById('stVectors').textContent=(d.faiss&&d.faiss.total_vectors)||0;
+  document.getElementById('stMemories').textContent=(d.ebbinghaus_scores||[]).length;
+}
+
+function addMsg(type,text){
+  const area=document.getElementById('chatArea');
+  const div=document.createElement('div');
+  div.className='chat-msg '+type;
+  const avatar=type==='ai'?'AI':'ME';
+  const time=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  div.innerHTML='<div class="msg-avatar '+type+'">'+avatar+'</div><div class="msg-body"><div class="msg-bubble">'+text+'</div><div class="msg-time">'+time+'</div></div>';
+  area.appendChild(div);
+  area.scrollTop=area.scrollHeight;
+  return div;
+}
+
+function addPipelineSteps(trace){
+  const area=document.getElementById('chatArea');
+  trace.forEach((t,i)=>{
+    setTimeout(()=>{
+      const div=document.createElement('div');
+      div.className='pipe-step';
+      const colors=['#3b82f6','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ec4899','#f97316'];
+      const c=colors[i%colors.length];
+      div.innerHTML='<div class="step-icon" style="background:'+c+'">'+(t.step||i+1)+'</div><div style="flex:1;"><div class="step-name">'+t.name+' <span class="step-ms">'+(t.elapsed_ms||0)+'ms</span></div><div class="step-info">'+(t.detail||'')+'</div></div>';
+      area.appendChild(div);
+      area.scrollTop=area.scrollHeight;
+      lastTrace=trace;
+      renderPipeline();
+    },i*200);
+  });
+}
+
+async function sendMessage(){
+  const field=document.getElementById('inputField');
+  const text=field.value.trim();
+  if(!text)return;
+  field.value='';
+  addMsg('user',text.replace(/\n/g,'<br>'));
+  const loading=addMsg('ai','<span class="loading"></span> 处理中...');
+  try{
+    const isSearch=/[?？]$/.test(text)||/^(谁|什么|哪|how|what|who|where|why|查询|搜索|找)/i.test(text);
+    let result;
+    if(isSearch){
+      result=await apiPost('/api/memory/search',{query:text,user_id:'demo_user',top_k:5});
+    }else{
+      result=await apiPost('/api/memory/add',{content:text,user_id:'demo_user'});
+    }
+    loading.querySelector('.msg-bubble').innerHTML=formatResult(result,isSearch);
+    if(result.trace){addPipelineSteps(result.trace);}
+    if(isSearch&&result.graph_context){loadGraphFromContext(result.graph_context);}
+    checkConn();
+    loadGraph();
+    loadMemories();
+  }catch(e){
+    loading.querySelector('.msg-bubble').innerHTML='<span style="color:var(--red)">错误: '+e.message+'</span>';
+  }
+}
+
+function formatResult(r,isSearch){
+  if(isSearch){
+    let html='<b>回答:</b> '+(r.answer||'(无回答)')+'<br>';
+    if(r.results&&r.results.length){
+      html+='<div style="margin-top:4px;font-size:10px;color:var(--text2);">检索到 '+r.results.length+' 条 (score='+((r.results[0].score)||0).toFixed(4)+', source='+r.results[0].source+')</div>';
+    }
+    html+='<div style="margin-top:2px;font-size:10px;color:var(--text3);">耗时 '+(r.total_elapsed_ms||0)+'ms</div>';
+    return html;
+  }
+  let html='<b>操作:</b> '+(r.action||'ADD')+'<br>';
+  html+='<b>记忆ID:</b> <code>'+(r.memory_id||'')+'</code><br>';
+  if(r.entities)html+='<b>实体:</b> '+r.entities.length+' 个 ('+r.entities.slice(0,3).map(function(e){return e.name;}).join(', ')+(r.entities.length>3?'...':'')+')<br>';
+  if(r.relationships)html+='<b>关系:</b> '+r.relationships.length+' 条<br>';
+  html+='<div style="margin-top:2px;font-size:10px;color:var(--text3);">耗时 '+(r.total_elapsed_ms||0)+'ms</div>';
+  return html;
+}
+
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
+
+function quickAdd(){document.getElementById('inputField').value='王芳是货拉拉数据平台部的后端工程师，负责实时计算引擎的开发。她熟悉Flink流处理和Kafka消息队列，每周三参加数据架构评审。';sendMessage();}
+function quickSearch(){document.getElementById('inputField').value='谁负责实时计算引擎？';sendMessage();}
+function quickAdd2(){document.getElementById('inputField').value='李洛和王芳在技术评审会上讨论了GraphRAG引擎的架构方案，决定采用三通道检索融合策略。';sendMessage();}
+function quickSearch2(){document.getElementById('inputField').value='李洛和王芳讨论了什么？';sendMessage();}
+
+async function loadGraph(){
+  try{
+    const d=await api('/api/graph');
+    renderGraph(d.vertices||[],d.edges||[]);
+  }catch(e){console.error(e);}
+}
+
+function loadGraphFromContext(ctx){
+  const lines=ctx.split('\n').filter(function(l){return l.indexOf('-->')>=0;});
+  const nodes=new Map(),eds=[];
+  lines.forEach(function(l){
+    const m=l.match(/^(.+?)\s*--\[(.+?)\]-->\s*(.+)$/);
+    if(m){const s=m[1].trim(),t=m[3].trim(),rel=m[2].trim();nodes.set(s,{id:s,label:s});nodes.set(t,{id:t,label:t});eds.push({source:s,target:t,label:rel});}
+  });
+  if(nodes.size>0)renderGraph(Array.from(nodes.values()),eds);
+}
+
+function renderGraph(vertices,edges){
+  const elements=[];
+  const typeColors={person:'#3b82f6',organization:'#10b981',project:'#8b5cf6',product:'#f59e0b',concept:'#06b6d4',event:'#ec4899',team:'#f97316',identity:'#6366f1',time:'#14b8a6',skill:'#e879f9'};
+  vertices.forEach(function(v){
+    const name=typeof v==='string'?v:(v.name||v.label||v.id||'');
+    const type=typeof v==='object'?(v.type||(v.properties&&v.properties.type)||''):'';
+    const id=typeof v==='string'?v:(v.id||name);
+    elements.push({data:{id:id,label:name,type:type,bg:typeColors[type]||'#6b7280'}});
+  });
+  edges.forEach(function(e){
+    const sid=e.source||e.source_name||'';
+    const tid=e.target||e.target_name||'';
+    if(sid&&tid)elements.push({data:{source:sid,target:tid,label:e.relationship||e.label||''}});
+  });
+  if(!cy){
+    cy=cytoscape({container:document.getElementById('cy'),elements:elements,
+      style:[
+        {selector:'node',style:{'background-color':'data(bg)','label':'data(label)','color':'#1a1d28','font-size':'10px','text-valign':'bottom','text-margin-y':4,'width':24,'height':24,'border-width':2,'border-color':'#fff'}},
+        {selector:'edge',style:{'width':1.5,'line-color':'#cbd5e1','target-arrow-color':'#cbd5e1','target-arrow-shape':'triangle','curve-style':'bezier','label':'data(label)','font-size':'8px','color':'#94a3b8','text-rotation':'autorotate'}},
+        {selector:':selected',style:{'border-color':'#3b82f6','border-width':3}}
+      ],
+      layout:{name:'cose',animate:true,animationDuration:300,nodeRepulsion:8000,idealEdgeLength:80}
+    });
+  }else{
+    cy.elements().remove();
+    cy.add(elements);
+    cy.layout({name:'cose',animate:true}).run();
+  }
+}
+
+function cyFit(){if(cy)cy.fit(undefined,30);}
+function cyLayout(name){if(cy)cy.layout({name:name,animate:true}).run();}
+
+async function loadMemories(){
+  try{
+    const d=await api('/api/stats');
+    const mems=d.ebbinghaus_scores||[];
+    const el=document.getElementById('memList');
+    if(!mems.length){el.innerHTML='<div style="color:var(--text3);text-align:center;padding:20px;">暂无记忆</div>';return;}
+    el.innerHTML=mems.map(function(m){
+      return '<div class="mem-card"><div class="mem-id">ID: '+m.id+'</div><div class="mem-content">'+(m.content||'').substring(0,120)+(m.content&&m.content.length>120?'...':'')+'</div><div class="mem-meta"><span>访问:'+(m.access_count||0)+'</span><span>'+((m.elapsed_hours||0)).toFixed(1)+'h前</span><span class="mem-retention">保留率:'+((m.retention||0)*100).toFixed(0)+'%</span></div><div class="mem-actions"><button onclick="searchById(\''+m.id+'\')">搜索</button><button onclick="deleteMem(\''+m.id+'\')" class="del">删除</button></div></div>';
+    }).join('');
+  }catch(e){console.error(e);}
+}
+
+async function deleteMem(id){
+  if(!confirm('确认删除记忆 '+id+'?'))return;
+  try{await apiPost('/api/memory/delete',{memory_id:id});loadMemories();checkConn();loadGraph();}catch(e){alert('删除失败: '+e.message);}
+}
+
+async function searchById(id){
+  const mem=await api('/api/memory/get?memory_id='+id);
+  if(mem&&mem.content){document.getElementById('inputField').value=mem.content.substring(0,50);sendMessage();}
+}
+
+async function compressMemories(){
+  addMsg('ai','正在压缩记忆...');
+  try{const r=await apiPost('/api/memory/compress',{user_id:'demo_user'});addMsg('ai','压缩完成: '+JSON.stringify(r).substring(0,200));}catch(e){addMsg('ai','压缩失败: '+e.message);}
+}
+
+function renderPipeline(){
+  const el=document.getElementById('pipeContent');
+  if(!lastTrace.length){el.innerHTML='<div style="color:var(--text3);text-align:center;padding:40px;">暂无管线数据</div>';return;}
+  el.innerHTML=lastTrace.map(function(t,i){
+    const colors=['#3b82f6','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ec4899','#f97316'];
+    const c=colors[i%colors.length];
+    return '<div class="pipe-step" style="margin-bottom:6px;"><div class="step-icon" style="background:'+c+';width:24px;height:24px;font-size:11px;">'+(t.step||i+1)+'</div><div style="flex:1;"><div class="step-name">'+t.name+' <span class="step-ms" style="float:right;">'+(t.elapsed_ms||0)+'ms</span></div><div class="step-info">'+(t.detail||'')+'</div>'+(t.data?'<pre>'+JSON.stringify(t.data,null,2)+'</pre>':'')+'</div></div>';
+  }).join('');
+}
+
+function renderCapabilities(){
+  document.getElementById('tab-capabilities').innerHTML='<div class="cap-grid">'+
+  '<div class="cap-card"><h3>ADD 管线 <span class="cap-badge p0">P0</span></h3><ul><li>V3 ADD-only 提取 (DeepSeek chat, 7+ facts/batch)</li><li>LLM 实体抽取 (12实体+11关系/条)</li><li>MD5 内容去重 + Token Jaccard 0.95</li><li>指代消解 / 冲突检测 / 关系补全</li><li>同事推理 (multi-person 触发)</li><li>三存储: HugeGraph + FAISS + BM25</li></ul></div>'+
+  '<div class="cap-card"><h3>SEARCH 管线 <span class="cap-badge p0">P0</span></h3><ul><li>意图分类 (rule + LLM fallback)</li><li>查询改写 (LLM, intent classification)</li><li>3通道加性融合: FAISS + BM25 + Graph</li><li>Ebbinghaus 衰减加权 (k=0.821)</li><li>Entity Boost (图上下文增强)</li><li>LLM 回答生成 + Provenance 溯源</li></ul></div>'+
+  '<div class="cap-card"><h3>HugeGraph 1.7.0 适配</h3><ul><li>动态 Schema (47 vertex labels)</li><li>PRIMARY_KEY ID 策略 (label_id:name)</li><li>Edge Label 冲突自动变体 (_v2/_v3)</li><li>多跳图遍历 (BFS, MAX_GRAPH_PATH=10)</li><li>Graph Store 开关 (honor disabled flag)</li></ul></div>'+
+  '<div class="cap-card"><h3>Agent 协作 <span class="cap-badge new">NEW</span></h3><ul><li>5级权限 (read/write/admin/owner/root)</li><li>3级隐私 (standard/sensitive/confidential)</li><li>协作组 (create_group / add_member)</li><li>跨 Agent 共享 (AgentMemoryManager)</li><li>CRUD 持久化 (#1147 修复)</li></ul></div>'+
+  '<div class="cap-card"><h3>PowerMem 新特性 <span class="cap-badge new">14 commits</span></h3><ul><li>NVIDIA NIM Rerank Provider</li><li>Permission 标准化 + memory_id 标准化</li><li>SQLite auto-fallback (SeekDB 不可用时)</li><li>Memory search fallback (无 embedding 时)</li><li>CLI: profile/batch/import-export/quality</li><li>Filter key collision 修复 (#1093)</li></ul></div>'+
+  '<div class="cap-card"><h3>智能增强</h3><ul><li>记忆版本历史 (MemoryHistoryTracker)</li><li>用户画像注入 (UserProfileStore)</li><li>RouteStore 分片路由</li><li>记忆压缩 (聚类+LLM摘要+剪枝)</li><li>FAISS 可删除索引 (IDMap+IDSelector)</li><li>LLM 查询改写 (别名/指代/变体)</li></ul></div>'+
+  '<div class="cap-card"><h3>检索指标</h3><ul><li>LOCOMO v4: Accuracy 10.08%</li><li>Hit@5: 19.38%</li><li>MRR: 0.1332</li><li>p95 latency: 62ms (fast_eval)</li><li>3 sessions / 387 QA</li></ul></div>'+
+  '<div class="cap-card"><h3>技术栈</h3><ul><li>LLM: DeepSeek v4-pro + deepseek-chat</li><li>Embedding: all-MiniLM-L6-v2 (384d)</li><li>Vector: FAISS IndexFlatIP</li><li>Fulltext: BM25 (jieba 分词)</li><li>Graph: HugeGraph 1.7.0 (RocksDB)</li><li>Server: Flask + 38+ REST API</li></ul></div>'+
+  '</div>';
+}
+
+function switchTab(name){
+  document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.toggle('active',['graph','memories','pipeline','capabilities'][i]===name);});
+  document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active');});
+  document.getElementById('tab-'+name).classList.add('active');
+  if(name==='graph')loadGraph();
+  if(name==='memories')loadMemories();
+  if(name==='capabilities')renderCapabilities();
+  if(name==='pipeline')renderPipeline();
+}
+
+async function runAutoDemo(){
+  if(autoDemoRunning)return;
+  autoDemoRunning=true;
+  const btn=document.getElementById('autoDemoBtn');
+  btn.disabled=true;btn.textContent='演示中...';
+  const steps=[
+    {text:'李洛是货拉拉AI平台部的架构师，负责GraphRAG引擎和Agent记忆系统设计。他熟悉HugeGraph和PowerMem，每周二参加技术评审。',wait:42000},
+    {text:'李洛负责什么？',wait:12000},
+    {text:'王芳是数据平台部的后端工程师，熟悉Flink和Kafka，每周三参加数据架构评审。',wait:42000},
+    {text:'谁熟悉Flink？',wait:12000},
+    {text:'李洛和王芳分别参加什么会议？',wait:12000},
+  ];
+  for(let i=0;i<steps.length;i++){
+    if(i>0)await new Promise(function(r){setTimeout(r,steps[i-1].wait);});
+    document.getElementById('inputField').value=steps[i].text;
+    sendMessage();
+  }
+  await new Promise(function(r){setTimeout(r,steps[steps.length-1].wait);});
+  btn.disabled=false;btn.textContent='一键演示';autoDemoRunning=false;
+}
+
+(async function(){
+  renderCapabilities();
+  const d=await checkConn();
+  if(d){addMsg('ai','系统已连接。HugeGraph 1.7.0 + PowerMem 62aefd8 就绪。<br>点击「一键演示」或直接输入记忆内容/提问。');loadGraph();loadMemories();}
+  else{addMsg('ai','<span style="color:var(--red)">未连接到 Memory Server (127.0.0.1:8765)。</span><br>请先启动: <code>python memory_backend.py --port 8765</code>');}
+})();
+</script>
+</body>
+</html>

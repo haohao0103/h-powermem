@@ -20,7 +20,7 @@ from powermem.utils.utils import (
     get_current_datetime,
     remove_code_blocks,
 )
-from powermem.prompts import GraphPrompts
+from powermem.prompts import GraphPrompts, GraphToolsPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -48,28 +48,55 @@ class HugeGraphMemoryGraph(GraphStoreBase):
     """
 
     def __init__(self, config: Any) -> None:
+        """Initialize HugeGraph graph memory.
+
+        Args:
+            config: Memory configuration (MemoryConfig) containing graph_store,
+                    embedder, and llm configs.
+        """
         self.config = config
+
+        # Extract graph_store config (same pattern as OceanBase MemoryGraph)
+        if hasattr(config, 'graph_store') and config.graph_store:
+            gs = config.graph_store
+            if hasattr(gs, 'config'):
+                gs_config = gs.config
+            else:
+                gs_config = gs
+        else:
+            gs_config = config
+
+        def get_val(key, default=None):
+            if isinstance(gs_config, dict):
+                return gs_config.get(key, default)
+            return getattr(gs_config, key, default)
+
+        # Connection params
+        self._url = get_val("host", "") or "http://127.0.0.1:8080"
+        port = str(get_val("port", "8080") or "8080")
+        if not self._url.startswith("http"):
+            self._url = f"http://{self._url}:{port}"
+        self._user = get_val("user", "admin") or "admin"
+        self._password = get_val("password", "admin") or "admin"
+        self._graph = get_val("db_name", "hugegraph") or "hugegraph"
+        self._max_hops = get_val("max_hops", 3)
+        self._collection = get_val("collection_name", "power_mem")
+
         self._extract_llm = None
         self._embedder = None
         self._graph_prompts = GraphPrompts()
+        self._graph_tools_prompts = GraphToolsPrompts()
         self._edge_cache: Dict[tuple, str] = {}
         self._vl_cache: set = set()
         self._schema_initialized = False
 
-        # Connection params from config
-        self._url = getattr(config, "host", "") or "http://127.0.0.1:8080"
-        if not self._url.startswith("http"):
-            self._url = f"http://{self._url}:{getattr(config, 'port', '8080')}"
-        self._user = getattr(config, "user", "admin") or "admin"
-        self._password = getattr(config, "password", "admin") or "admin"
-        self._graph = getattr(config, "db_name", "hugegraph") or "hugegraph"
-        self._max_hops = getattr(config, "max_hops", 3)
-
-        # Collection name for filtering
-        self._collection = getattr(config, "collection_name", "power_mem")
-
         self._init_client()
         self._init_schema()
+
+        # Initialize LLM (same pattern as OceanBase MemoryGraph)
+        self._llm_provider = self._get_llm_provider()
+        llm_config = self._get_llm_config()
+        self._llm = LLMFactory.create(self._llm_provider, llm_config)
 
     def _init_client(self):
         """Initialize PyHugeClient connection."""
@@ -165,11 +192,34 @@ class HugeGraphMemoryGraph(GraphStoreBase):
             return edge_label
 
     def _get_llm(self):
-        """Get or create LLM instance for entity extraction."""
-        if self._extract_llm is None:
-            llm_config = getattr(self.config, "llm", None)
-            self._extract_llm = LLMFactory.create(llm_config) if llm_config else LLMFactory.create()
-        return self._extract_llm
+        """Get LLM instance (initialized in __init__)."""
+        return self._llm
+
+    def _get_llm_provider(self) -> str:
+        """Get LLM provider from config (same as OceanBase MemoryGraph)."""
+        config = self.config
+        if hasattr(config, 'llm') and config.llm:
+            llm_cfg = config.llm
+            if hasattr(llm_cfg, 'provider'):
+                return llm_cfg.provider
+            if isinstance(llm_cfg, dict):
+                return llm_cfg.get('provider', 'openai')
+        if hasattr(config, 'llm_provider'):
+            return config.llm_provider or 'openai'
+        return 'openai'
+
+    def _get_llm_config(self) -> Optional[Any]:
+        """Get LLM config from config (same as OceanBase MemoryGraph)."""
+        config = self.config
+        if hasattr(config, 'llm') and config.llm:
+            llm_cfg = config.llm
+            if hasattr(llm_cfg, 'config'):
+                return llm_cfg.config
+            if isinstance(llm_cfg, dict):
+                return llm_cfg.get('config')
+            # If it's a BaseLLMConfig itself, return it
+            return llm_cfg
+        return None
 
     def _get_embedder(self):
         """Get or create embedder instance."""
@@ -203,14 +253,89 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         return type_map.get(entity_type.lower(), "concept")
 
     def _extract_entities_and_relations(self, data: str) -> Dict[str, Any]:
-        """Use LLM to extract entities and relationships from text."""
+        """Use LLM to extract entities and relationships from text via tool calling."""
         llm = self._get_llm()
-        prompt = self._graph_prompts.extract_prompt(data)
         try:
-            response = llm.complete(prompt)
-            text = remove_code_blocks(response.text if hasattr(response, "text") else str(response))
-            result = json.loads(text)
-            return result
+            # Step 1: Extract entities using tool calling (same as OceanBase MemoryGraph)
+            extract_tool = self._graph_tools_prompts.get_extract_entities_tool()
+            noop_tool = self._graph_tools_prompts.get_noop_tool()
+            search_results = llm.generate_response(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a smart assistant who understands entities and their types in a given text. "
+                            "Extract all the entities from the text. "
+                            "***DO NOT*** answer the question itself if the given text is a question."
+                        ),
+                    },
+                    {"role": "user", "content": data},
+                ],
+                tools=[extract_tool, noop_tool],
+            )
+
+            # Normalize response
+            if isinstance(search_results, str):
+                search_results = {"content": search_results, "tool_calls": []}
+            elif search_results is None:
+                search_results = {"content": "", "tool_calls": []}
+
+            entity_type_map = {}
+            for tool_call in search_results.get("tool_calls", []):
+                if tool_call.get("name") != "extract_entities":
+                    continue
+                for item in tool_call.get("arguments", {}).get("entities", []):
+                    entity_type_map[item["entity"]] = item["entity_type"]
+
+            # Normalize names
+            entity_type_map = {
+                k.lower().replace(" ", "_"): v.lower().replace(" ", "_")
+                for k, v in entity_type_map.items()
+            }
+
+            if not entity_type_map:
+                logger.debug(f"No entities extracted from: {data[:100]}")
+                return {"entities": [], "relationships": []}
+
+            # Step 2: Extract relationships
+            relations_tool = self._graph_tools_prompts.get_relations_tool()
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a smart assistant who understands relations between entities. "
+                        "Given the text and a list of entities, extract all relationships. "
+                    ),
+                },
+                {"role": "user", "content": data},
+            ]
+            rel_results = llm.generate_response(
+                messages=messages,
+                tools=[relations_tool, noop_tool],
+            )
+
+            if isinstance(rel_results, str):
+                rel_results = {"content": rel_results, "tool_calls": []}
+            elif rel_results is None:
+                rel_results = {"content": "", "tool_calls": []}
+
+            relationships = []
+            for tool_call in rel_results.get("tool_calls", []):
+                if tool_call.get("name") != "extract_relations":
+                    continue
+                for item in tool_call.get("arguments", {}).get("relations", []):
+                    relationships.append({
+                        "source": item.get("source", item.get("subject", "")),
+                        "target": item.get("target", item.get("object", "")),
+                        "relationship": item.get("relationship", item.get("relation", "related_to")),
+                        "source_type": item.get("source_type", entity_type_map.get(item.get("source",""), "concept")),
+                        "target_type": item.get("target_type", entity_type_map.get(item.get("target",""), "concept")),
+                    })
+
+            entities = [{"name": k, "type": v} for k, v in entity_type_map.items()]
+            logger.info(f"Extracted {len(entities)} entities, {len(relationships)} relationships")
+            return {"entities": entities, "relationships": relationships}
+
         except Exception as e:
             logger.warning(f"LLM entity extraction failed: {e}")
             return {"entities": [], "relationships": []}
@@ -221,31 +346,14 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         if not self._ensure_vertex_label(label):
             return None
 
-        # PRIMARY_KEY ID format: label_id:name
         vid = f"{label}:{name}"
+        properties = {"name": name, "type": entity_type}
         try:
-            # Check if exists
-            existing = self._client.graph().getVertex(label, vid)
-            if existing:
-                return vid
-        except Exception:
-            pass
-
-        # Create new vertex
-        try:
-            self._client.graph().addVertex(label) \
-                .property("name", name) \
-                .property("type", entity_type) \
-                .property("memory_id", memory_id) \
-                .property("created_at", time.time()) \
-                .property("access_count", 0) \
-                .property("initial_score", 1.0) \
-                .property("last_accessed_at", time.time()) \
-                .commit()
-            return vid
+            self._client.graph().addVertex(label, properties)
+            logger.debug(f"Created vertex: {label}:{name}")
         except Exception as e:
-            logger.debug(f"Vertex create failed for {name}: {e}")
-            return vid  # May already exist
+            logger.debug(f"Vertex create {label}:{name}: {e}")
+        return vid
 
     def _store_relationship(self, src_name: str, src_type: str,
                             tgt_name: str, tgt_type: str,
@@ -267,10 +375,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         tgt_vid = f"{tgt_label}:{tgt_name}"
 
         try:
-            self._client.graph().addEdge(actual_label) \
-                .from_(src_vid).to(tgt_vid) \
-                .property("memory_id", memory_id) \
-                .commit()
+            self._client.graph().addEdge(actual_label, {"memory_id": memory_id}, src_vid, tgt_vid)
         except Exception as e:
             logger.debug(f"Edge create failed {src_name}->{tgt_name}: {e}")
 
@@ -316,6 +421,39 @@ class HugeGraphMemoryGraph(GraphStoreBase):
             "relationships": stored_edges,
         }
 
+    def _query_vertices(self, label: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        """Query vertices by label using getVertexByCondition (HugeGraph 1.7.0 compatible).
+
+        HugeGraph 1.7.0's traversers/vertices API requires 'ids' parameter and cannot
+        scan by label. The correct API is graph/vertices (via PyHugeClient's
+        getVertexByCondition) which supports label-based queries.
+        """
+        try:
+            result = self._client.graph().getVertexByCondition(label=label, limit=limit)
+            if not result:
+                return []
+            if not isinstance(result, list):
+                result = [result]
+            vertices = []
+            for v in result:
+                vdata = {}
+                if hasattr(v, 'id'):
+                    vdata["id"] = str(v.id) if v.id else ""
+                    vdata["label"] = getattr(v, 'label', label)
+                    props = getattr(v, 'properties', {}) or {}
+                    vdata["name"] = props.get("name", getattr(v, 'name', ''))
+                    vdata["type"] = props.get("type", getattr(v, 'type', ''))
+                    vdata.update(props)
+                elif isinstance(v, dict):
+                    vdata = v
+                else:
+                    vdata = {"id": str(v), "label": label, "name": str(v)}
+                vertices.append(vdata)
+            return vertices
+        except Exception as e:
+            logger.debug(f"Query vertices label={label}: {e}")
+            return []
+
     def search(self, query: str, filters: Dict[str, Any], limit: int = 10) -> List[Dict[str, Any]]:
         """Search graph for entities and relationships matching the query."""
         # Extract entities from query
@@ -327,9 +465,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
             # Search for matching vertices
             for vl in _VERTEX_LABELS:
                 try:
-                    vertices = self._client.graph().getVerticesByLabel(
-                        vl, limit=limit
-                    )
+                    vertices = self._query_vertices(label=vl, limit=limit)
                     if vertices:
                         for v in (vertices if isinstance(vertices, list) else [vertices]):
                             vdata = v if isinstance(v, dict) else {}
@@ -381,7 +517,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
             # Delete vertices with matching memory_id property
             for vl in _VERTEX_LABELS:
                 try:
-                    vertices = self._client.graph().getVerticesByLabel(vl, limit=1000)
+                    vertices = self._query_vertices(label=vl, limit=1000)
                     if vertices:
                         for v in (vertices if isinstance(vertices, list) else [vertices]):
                             vdata = v if isinstance(v, dict) else {}
@@ -397,7 +533,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         results = []
         for vl in _VERTEX_LABELS:
             try:
-                vertices = self._client.graph().getVerticesByLabel(vl, limit=limit)
+                vertices = self._query_vertices(label=vl, limit=limit)
                 if vertices:
                     for v in (vertices if isinstance(vertices, list) else [vertices]):
                         vdata = v if isinstance(v, dict) else {}
@@ -418,7 +554,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         """Reset the graph by clearing all vertices."""
         for vl in _VERTEX_LABELS:
             try:
-                vertices = self._client.graph().getVerticesByLabel(vl, limit=10000)
+                vertices = self._query_vertices(label=vl, limit=10000)
                 if vertices:
                     for v in (vertices if isinstance(vertices, list) else [vertices]):
                         vdata = v if isinstance(v, dict) else {}
@@ -441,7 +577,7 @@ class HugeGraphMemoryGraph(GraphStoreBase):
 
         for vl in _VERTEX_LABELS:
             try:
-                vertices = self._client.graph().getVerticesByLabel(vl, limit=10000)
+                vertices = self._query_vertices(label=vl, limit=10000)
                 count = len(vertices) if isinstance(vertices, list) else (1 if vertices else 0)
                 vertex_count += count
                 if count > 0:
@@ -463,16 +599,15 @@ class HugeGraphMemoryGraph(GraphStoreBase):
         users = set()
         for vl in _VERTEX_LABELS:
             try:
-                vertices = self._client.graph().getVerticesByLabel(vl, limit=10000)
+                vertices = self._query_vertices(label=vl, limit=10000)
                 if vertices:
                     for v in (vertices if isinstance(vertices, list) else [vertices]):
                         vdata = v if isinstance(v, dict) else {}
                         mid = vdata.get("memory_id", "")
                         if mid:
-                            # Extract user_id from memory_id (convention: user_id:timestamp)
                             parts = mid.split(":")
                             if len(parts) > 1:
                                 users.add(parts[0])
-        except Exception:
-            continue
+            except Exception:
+                pass
         return list(users)

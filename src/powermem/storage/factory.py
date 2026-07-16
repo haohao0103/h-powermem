@@ -11,6 +11,7 @@ from powermem.storage.config.base import BaseVectorStoreConfig, BaseGraphStoreCo
 from powermem.storage.config.oceanbase import OceanBaseConfig, OceanBaseGraphConfig
 from powermem.storage.config.pgvector import PGVectorConfig
 from powermem.storage.config.sqlite import SQLiteConfig
+from powermem.storage.config.hugegraph import HugeGraphConfig
 
 
 def load_class(class_type):
